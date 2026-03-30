@@ -1,0 +1,208 @@
+% =========================================================
+% AE700 Project - Part 4(iv)
+% Script: run_simulation.m
+%
+% HOW TO RUN:
+%   1. Make sure mavsim_chap3.slx is open
+%   2. Type: run_simulation
+% =========================================================
+clear; close all; clc;
+
+%% ===== STEP 1: Load parameters (NO trim call inside) =====
+P = cessna620_parameters();
+
+%% ===== STEP 2: Compute trim FIRST before anything else =====
+Va    = 190;   % ft/s
+gamma = 0;
+R     = Inf;
+
+[x_trim, u_trim] = compute_trim(Va, gamma, R, P);
+
+% check alpha
+alpha_trim = atan2(x_trim(6), x_trim(4)) * 180/pi;
+fprintf('alpha = %.2f deg (should be 5-7 deg)\n', alpha_trim);
+
+%% ===== STEP 3: Update P with trim ICs =====
+P.u0     = x_trim(4);
+P.v0     = x_trim(5);
+P.w0     = x_trim(6);
+P.phi0   = x_trim(7);
+P.theta0 = x_trim(8);
+P.psi0   = x_trim(9);
+P.p0     = x_trim(10);
+P.q0     = x_trim(11);
+P.r0     = x_trim(12);
+printf(P.u0);
+%% ===== STEP 4: Push UPDATED P to base workspace =====
+assignin('base', 'P', P);
+
+% verify P is correct before sim
+fprintf('Verified: P.theta0 = %.4f deg (should be %.4f)\n',...
+        P.theta0*180/pi, x_trim(8)*180/pi);
+fprintf('Verified: P.u0     = %.4f ft/s\n', P.u0);
+
+%% ===== STEP 5: Set trim controls =====
+assignin('base', 'delta_e', u_trim(1));
+assignin('base', 'delta_a', u_trim(2));
+assignin('base', 'delta_r', u_trim(3));
+assignin('base', 'delta_t', u_trim(4));
+
+%% ===== STEP 6: Force model update then run =====
+set_param('mavsim_trim', 'SimulationCommand', 'update');
+set_param('mavsim_trim', 'StopTime', '10');
+sim('mavsim_trim');
+
+% confirm ICs were correct
+fprintf('Simulation done.\n');
+
+%% ===== STEP 7: Plot trim verification =====
+figure('Name','Trim Verification gamma=0','Position',[100 100 1000 700]);
+
+subplot(4,2,1);
+plot(tout, xout(:,4), 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim(4), 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('u (ft/s)');
+title('Body velocity u — should be flat');
+legend('simulated','trim value'); grid on;
+
+subplot(4,2,2);
+plot(tout, xout(:,5), 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim(5), 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('v (ft/s)');
+title('Body velocity v — should be flat'); grid on;
+
+subplot(4,2,3);
+plot(tout, xout(:,6), 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim(6), 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('w (ft/s)');
+title('Body velocity w — should be flat'); grid on;
+
+subplot(4,2,4);
+plot(tout, xout(:,7)*180/pi, 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim(7)*180/pi, 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('\phi (deg)');
+title('Roll angle \phi — should be flat'); grid on;
+
+subplot(4,2,5);
+plot(tout, xout(:,8)*180/pi, 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim(8)*180/pi, 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('\theta (deg)');
+title('Pitch angle \theta — should be flat'); grid on;
+
+subplot(4,2,6);
+plot(tout, xout(:,11)*180/pi, 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim(11)*180/pi, 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('q (deg/s)');
+title('Pitch rate q — should be flat'); grid on;
+
+subplot(4,2,7);
+plot(tout, xout(:,10)*180/pi, 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim(10)*180/pi, 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('p (deg/s)');
+title('Roll rate p — should be flat'); grid on;
+
+subplot(4,2,8);
+plot(tout, -xout(:,3), 'b', 'LineWidth', 1.5); hold on;
+yline(-P.pd0, 'r--', 'LineWidth', 1);
+xlabel('Time (s)'); ylabel('h (ft)');
+title('Altitude h — should be flat for \gamma=0'); grid on;
+
+sgtitle(sprintf('Trim Verification: Va=%.0f ft/s, \\gamma=0, \\alpha=%.2f deg',...
+        Va, alpha_trim), 'FontSize', 13);
+
+%% ===== STEP 8: Gamma sweep =====
+gamma_vals = [-0.2, -0.1, 0, 0.1, 0.2];
+colors     = {'r', 'm', 'b', 'g', 'k'};
+
+figure('Name','Gamma Sweep — Altitude','Position',[100 100 800 500]);
+hold on;
+
+fprintf('\n%-12s %-12s %-12s %-14s %-12s\n',...
+        'gamma(deg)','alpha(deg)','theta(deg)','hdot_exp(ft/s)','hdot_sim(ft/s)');
+fprintf('%s\n', repmat('-',1,65));
+
+for i = 1:length(gamma_vals)
+    g = gamma_vals(i);
+
+    % compute trim for this gamma
+    [x_trim_i, u_trim_i] = compute_trim(Va, g, Inf, P);
+
+    % update P with trim ICs
+    P.u0=x_trim_i(4); P.v0=x_trim_i(5); P.w0=x_trim_i(6);
+    P.phi0=x_trim_i(7); P.theta0=x_trim_i(8); P.psi0=x_trim_i(9);
+    P.p0=x_trim_i(10); P.q0=x_trim_i(11); P.r0=x_trim_i(12);
+
+    % push updated P BEFORE sim
+    assignin('base','P',P);
+    assignin('base','delta_e',u_trim_i(1));
+    assignin('base','delta_a',u_trim_i(2));
+    assignin('base','delta_r',u_trim_i(3));
+    assignin('base','delta_t',u_trim_i(4));
+
+    % force update then run
+    set_param('mavsim_trim','SimulationCommand','update');
+    set_param('mavsim_trim','StopTime','10');
+    sim('mavsim_trim');
+
+    % compute climb rate
+    h_sim         = -xout(:,3);
+    hdot_expected = Va * sin(g);
+    hdot_actual   = (h_sim(end) - h_sim(1)) / (tout(end) - tout(1));
+    alpha_i       = atan2(x_trim_i(6), x_trim_i(4)) * 180/pi;
+    theta_i       = x_trim_i(8) * 180/pi;
+
+    fprintf('%-12.2f %-12.4f %-12.4f %-14.4f %-12.4f\n',...
+             g*180/pi, alpha_i, theta_i, hdot_expected, hdot_actual);
+
+    plot(tout, h_sim, colors{i}, 'LineWidth', 1.5,...
+         'DisplayName', sprintf('\\gamma=%.2f rad  \\dot{h}=%.1f ft/s',...
+         g, hdot_expected));
+end
+
+xlabel('Time (s)', 'FontSize', 12);
+ylabel('Altitude h (ft)', 'FontSize', 12);
+title('Altitude vs Time for Different \gamma Values', 'FontSize', 13);
+legend('Location','Best','FontSize',10);
+grid on;
+
+%% ===== STEP 9: State constancy for gamma=0.1 =====
+g_check = 0.1;
+[x_trim_c, u_trim_c] = compute_trim(Va, g_check, Inf, P);
+
+P.u0=x_trim_c(4); P.v0=x_trim_c(5); P.w0=x_trim_c(6);
+P.phi0=x_trim_c(7); P.theta0=x_trim_c(8); P.psi0=x_trim_c(9);
+P.p0=x_trim_c(10); P.q0=x_trim_c(11); P.r0=x_trim_c(12);
+assignin('base','P',P);
+assignin('base','delta_e',u_trim_c(1));
+assignin('base','delta_a',u_trim_c(2));
+assignin('base','delta_r',u_trim_c(3));
+assignin('base','delta_t',u_trim_c(4));
+
+set_param('mavsim_trim','SimulationCommand','update');
+set_param('mavsim_trim','StopTime','10');
+sim('mavsim_trim');
+
+figure('Name','State Constancy gamma=0.1','Position',[100 100 900 350]);
+
+subplot(1,3,1);
+plot(tout, xout(:,4), 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim_c(4),'r--');
+xlabel('Time (s)'); ylabel('u (ft/s)');
+title('u — should be constant'); grid on;
+
+subplot(1,3,2);
+plot(tout, xout(:,8)*180/pi, 'b', 'LineWidth', 1.5); hold on;
+yline(x_trim_c(8)*180/pi,'r--');
+xlabel('Time (s)'); ylabel('\theta (deg)');
+title('\theta — should be constant'); grid on;
+
+subplot(1,3,3);
+plot(tout, -xout(:,3), 'b', 'LineWidth', 1.5);
+xlabel('Time (s)'); ylabel('h (ft)');
+title(sprintf('h — climbing at %.2f ft/s', Va*sin(g_check)));
+grid on;
+
+sgtitle(sprintf('\\gamma=%.1f deg: only altitude should change',...
+        g_check*180/pi), 'FontSize', 12);
+
+fprintf('\nAll done. Check 3 figures.\n');
